@@ -22,7 +22,7 @@ func Example() {
 	}
 
 	// Create a new lock client.
-	locker := redislock.NewMin(client)
+	locker := redislock.New(client)
 
 	// Try to obtain lock.
 	lock, err := locker.Obtain("my-key", 100*time.Millisecond, nil)

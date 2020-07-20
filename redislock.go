@@ -27,48 +27,20 @@ var (
 	ErrLockNotHeld = errors.New("redislock: lock not held")
 )
 
-// // RedisClient is a minimal client interface.
-// type RedisClient interface {
-// 	SetNX(key string, value interface{}, expiration time.Duration) *redis.BoolCmd
-// 	Eval(script string, keys []string, args ...interface{}) *redis.Cmd
-// 	EvalSha(sha1 string, keys []string, args ...interface{}) *redis.Cmd
-// 	ScriptExists(scripts ...string) *redis.BoolSliceCmd
-// 	ScriptLoad(script string) *redis.StringCmd
-// }
-
-// type RedisClientMinimal interface {
-// 	SetNX(key string, value interface{}, expiration time.Duration) *redis.BoolCmd
-// 	Eval(script string, keys []string, args ...interface{}) *redis.Cmd
-// 	EvalSha(sha1 string, keys []string, args ...interface{}) *redis.Cmd
-// 	ScriptExists(scripts ...string) *redis.BoolSliceCmd
-// 	ScriptLoad(script string) *redis.StringCmd
-// }
-
-// // Client wraps a redis client.
-// type Client struct {
-// 	client RedisClient
-// 	tmp    []byte
-// 	tmpMu  sync.Mutex
-// }
-
-type ClientMin struct {
+type Client struct {
 	pool  *redis.Pool
 	tmp   []byte
 	tmpMu sync.Mutex
 }
 
 // // New creates a new Client instance with a custom namespace.
-// func New(client RedisClient) *Client {
-// 	return &Client{client: client}
-// }
-
-func NewMin(pool *redis.Pool) *ClientMin {
-	return &ClientMin{pool: pool}
+func New(pool *redis.Pool) *Client {
+	return &Client{pool: pool}
 }
 
 // Obtain tries to obtain a new lock using a key with the given TTL.
 // May return ErrNotObtained if not successful.
-func (c *ClientMin) Obtain(key string, ttl time.Duration, opt *Options) (*LockMin, error) {
+func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, error) {
 	// Create a random token
 	token, err := c.randomToken()
 	if err != nil {
@@ -82,11 +54,11 @@ func (c *ClientMin) Obtain(key string, ttl time.Duration, opt *Options) (*LockMi
 	var timer *time.Timer
 	for deadline := time.Now().Add(ttl); time.Now().Before(deadline); {
 
-		ok, err := c.obtainmin(key, value, ttl)
+		ok, err := c.obtain(key, value, ttl)
 		if err != nil {
 			return nil, err
 		} else if ok {
-			return &LockMin{client: c, key: key, value: value}, nil
+			return &Lock{client: c, key: key, value: value}, nil
 		}
 
 		backoff := retry.NextBackoff()
@@ -111,11 +83,7 @@ func (c *ClientMin) Obtain(key string, ttl time.Duration, opt *Options) (*LockMi
 	return nil, ErrNotObtained
 }
 
-// func (c *Client) obtain(key, value string, ttl time.Duration) (bool, error) {
-// 	return c.client.SetNX(key, value, ttl).Result()
-// }
-
-func (c *ClientMin) obtainmin(key, value string, ttl time.Duration) (bool, error) {
+func (c *Client) obtain(key, value string, ttl time.Duration) (bool, error) {
 	con := c.pool.Get()
 	defer con.Close()
 	_, err := redis.String(con.Do("SET", key, value, "PX", ttl.Milliseconds(), "NX"))
@@ -128,7 +96,7 @@ func (c *ClientMin) obtainmin(key, value string, ttl time.Duration) (bool, error
 	return true, nil
 }
 
-func (c *ClientMin) randomToken() (string, error) {
+func (c *Client) randomToken() (string, error) {
 	c.tmpMu.Lock()
 	defer c.tmpMu.Unlock()
 
@@ -144,60 +112,33 @@ func (c *ClientMin) randomToken() (string, error) {
 
 // --------------------------------------------------------------------
 
-// Lock represents an obtained, distributed lock.
-// type Lock struct {
-// 	client *Client
-// 	key    string
-// 	value  string
-// }
-
-type LockMin struct {
-	client *ClientMin
+type Lock struct {
+	client *Client
 	key    string
 	value  string
 }
 
 // Obtain is a short-cut for New(...).Obtain(...).
-// func Obtain(client RedisClient, key string, ttl time.Duration, opt *Options) (*Lock, error) {
-// 	return New(client).Obtain(key, ttl, opt)
-// }
-
-// Obtain is a short-cut for New(...).Obtain(...).
-func Obtain(pool *redis.Pool, key string, ttl time.Duration, opt *Options) (*LockMin, error) {
-	return NewMin(pool).Obtain(key, ttl, opt)
+func Obtain(pool *redis.Pool, key string, ttl time.Duration, opt *Options) (*Lock, error) {
+	return New(pool).Obtain(key, ttl, opt)
 }
 
 // Key returns the redis key used by the lock.
-func (l *LockMin) Key() string {
+func (l *Lock) Key() string {
 	return l.key
 }
 
 // Token returns the token value set by the lock.
-func (l *LockMin) Token() string {
+func (l *Lock) Token() string {
 	return l.value[:22]
 }
 
 // Metadata returns the metadata of the lock.
-func (l *LockMin) Metadata() string {
+func (l *Lock) Metadata() string {
 	return l.value[22:]
 }
 
-// TTL returns the remaining time-to-live. Returns 0 if the lock has expired.
-// func (l *Lock) TTL() (time.Duration, error) {
-// 	res, err := luaPTTL.Run(l.client.client, []string{l.key}, l.value).Result()
-// 	if err == redis.Nil {
-// 		return 0, nil
-// 	} else if err != nil {
-// 		return 0, err
-// 	}
-
-// 	if num := res.(int64); num > 0 {
-// 		return time.Duration(num) * time.Millisecond, nil
-// 	}
-// 	return 0, nil
-// }
-
-func (l *LockMin) TTL() (time.Duration, error) {
+func (l *Lock) TTL() (time.Duration, error) {
 	con := l.client.pool.Get()
 	defer con.Close()
 
@@ -208,10 +149,8 @@ func (l *LockMin) TTL() (time.Duration, error) {
 		return 0, err
 	}
 
-	// if num := res.(int64); num > 0 {
-	// 	return time.Duration(num) * time.Millisecond, nil
-	// }
 	if res > 0 {
+		//expire for key is stored in milliseconds so convert
 		return time.Duration(res) * time.Millisecond, nil
 	}
 	return 0, nil
@@ -219,18 +158,7 @@ func (l *LockMin) TTL() (time.Duration, error) {
 
 // Refresh extends the lock with a new TTL.
 // May return ErrNotObtained if refresh is unsuccessful.
-// func (l *Lock) Refresh(ttl time.Duration, opt *Options) error {
-// 	ttlVal := strconv.FormatInt(int64(ttl/time.Millisecond), 10)
-// 	status, err := luaRefresh.Run(l.client.client, []string{l.key}, l.value, ttlVal).Result()
-// 	if err != nil {
-// 		return err
-// 	} else if status == int64(1) {
-// 		return nil
-// 	}
-// 	return ErrNotObtained
-// }
-
-func (l *LockMin) Refresh(ttl time.Duration, opt *Options) error {
+func (l *Lock) Refresh(ttl time.Duration, opt *Options) error {
 	con := l.client.pool.Get()
 	defer con.Close()
 
@@ -241,26 +169,13 @@ func (l *LockMin) Refresh(ttl time.Duration, opt *Options) error {
 	} else if status == 1 {
 		return nil
 	}
+	//either the value did not match or key does not exist
 	return ErrNotObtained
 }
 
 // Release manually releases the lock.
 // May return ErrLockNotHeld.
-// func (l *Lock) Release() error {
-// 	res, err := luaRelease.Run(l.client.client, []string{l.key}, l.value).Result()
-// 	if err == redis.Nil {
-// 		return ErrLockNotHeld
-// 	} else if err != nil {
-// 		return err
-// 	}
-
-// 	if i, ok := res.(int64); !ok || i != 1 {
-// 		return ErrLockNotHeld
-// 	}
-// 	return nil
-// }
-
-func (l *LockMin) Release() error {
+func (l *Lock) Release() error {
 	con := l.client.pool.Get()
 	defer con.Close()
 

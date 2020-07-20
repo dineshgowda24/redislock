@@ -16,10 +16,10 @@ import (
 const lockKey = "__bsm_redislock_unit_test__"
 
 var _ = Describe("Client", func() {
-	var subject *redislock.ClientMin
+	var subject *redislock.Client
 
 	BeforeEach(func() {
-		subject = redislock.NewMin(redisClient)
+		subject = redislock.New(redisClient)
 	})
 
 	AfterEach(func() {
@@ -75,14 +75,13 @@ var _ = Describe("Client", func() {
 		Expect(lock.Release()).To(MatchError(redislock.ErrLockNotHeld))
 	})
 
-	It("should fail to release if ontained by someone else", func() {
+	It("should fail to release if obtained by someone else", func() {
 		lock, err := redislock.Obtain(redisClient, lockKey, time.Minute, nil)
 		Expect(err).NotTo(HaveOccurred())
 
 		conn := redisClient.Get()
 		defer conn.Close()
 		_, err = conn.Do("SET", lockKey, "ABCD")
-		//Expect(redisClient.Set(lockKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(lock.Release()).To(MatchError(redislock.ErrLockNotHeld))
 	})
@@ -99,11 +98,9 @@ var _ = Describe("Client", func() {
 		conn := redisClient.Get()
 		defer conn.Close()
 		_, err := conn.Do("SET", lockKey, "ABCD")
-
-		//	Expect(redisClient.Set(lockKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
 		Expect(err).NotTo(HaveOccurred())
+		//20 millisecond
 		_, err = conn.Do("PEXPIRE", lockKey, 20)
-		//	Expect(redisClient.PExpire(lockKey, 20*time.Millisecond).Err()).NotTo(HaveOccurred())
 		Expect(err).NotTo(HaveOccurred())
 		lock, err := redislock.Obtain(redisClient, lockKey, time.Hour, &redislock.Options{
 			RetryStrategy: redislock.LimitRetry(redislock.LinearBackoff(100*time.Millisecond), 3),
@@ -113,9 +110,7 @@ var _ = Describe("Client", func() {
 
 		// no retry, fail
 		_, err = conn.Do("SET", lockKey, "ABCD")
-		//Expect(redisClient.Set(lockKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
 		Expect(err).NotTo(HaveOccurred())
-		//Expect(redisClient.PExpire(lockKey, 50*time.Millisecond).Err()).NotTo(HaveOccurred())
 		_, err = conn.Do("PEXPIRE", lockKey, 50)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -123,12 +118,8 @@ var _ = Describe("Client", func() {
 		Expect(err).To(MatchError(redislock.ErrNotObtained))
 
 		// // retry 2x, give up & fail
-		// Expect(redisClient.Set(lockKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
-		// Expect(redisClient.PExpire(lockKey, 50*time.Millisecond).Err()).NotTo(HaveOccurred())
 		_, err = conn.Do("SET", lockKey, "ABCD")
-		//Expect(redisClient.Set(lockKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
 		Expect(err).NotTo(HaveOccurred())
-		//Expect(redisClient.PExpire(lockKey, 50*time.Millisecond).Err()).NotTo(HaveOccurred())
 		_, err = conn.Do("PEXPIRE", lockKey, 50)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -136,6 +127,19 @@ var _ = Describe("Client", func() {
 			RetryStrategy: redislock.LimitRetry(redislock.LinearBackoff(time.Millisecond), 2),
 		})
 		Expect(err).To(MatchError(redislock.ErrNotObtained))
+
+		// // retry 3x, pass
+		_, err = conn.Do("SET", lockKey, "ABCD")
+		Expect(err).NotTo(HaveOccurred())
+		_, err = conn.Do("PEXPIRE", lockKey, 50)
+		Expect(err).NotTo(HaveOccurred())
+
+		lock, err = redislock.Obtain(redisClient, lockKey, 2*time.Hour, &redislock.Options{
+			RetryStrategy: redislock.LimitRetry(redislock.LinearBackoff(20*time.Millisecond), 3),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(lock.TTL()).To(BeNumerically("~", 2*time.Hour, time.Second))
+		Expect(lock.Release()).To(Succeed())
 	})
 
 	It("should prevent multiple locks (fuzzing)", func() {
