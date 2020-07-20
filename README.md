@@ -76,4 +76,4 @@ func main() {
 
 ## Documentation
 
-Full documentation is available on [GoDoc](http://godoc.org/github.com/bsm/redislock)
+Full documentation is available on [GoDoc](http://godoc.org/github.com/dineshgowda24/redislock)
