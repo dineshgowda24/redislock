@@ -1,7 +1,7 @@
 # redislock
 
 [![Build Status](https://travis-ci.com/dineshgowda24/redislock.svg)](https://travis-ci.com/dineshgowda24/redislock)
-[![GoDoc](https://godoc.org/github.com/bsm/redislock?status.png)](http://godoc.org/github.com/bsm/redislock)
+[![GoDoc](https://godoc.org/github.com/dineshgowda24/redislock?status.png)](http://godoc.org/github.com/bsm/redislock)
 [![Go Report Card](https://goreportcard.com/badge/github.com/bsm/redislock)](https://goreportcard.com/report/github.com/bsm/redislock)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
@@ -21,11 +21,14 @@ import (
 
 func main() {
 	// Connect to redis.
-	client := redis.NewClient(&redis.Options{
-		Network:	"tcp",
-		Addr:		"127.0.0.1:6379",
-	})
-	defer client.Close()
+	client := &redis.Pool{
+		MaxIdle:     3,
+		IdleTimeout: 240 * time.Second,
+		Dial: func() (redis.Conn, error) {
+			return redis.Dial("tcp", ":6379",
+				redis.DialDatabase(1))
+		},
+	}
 
 	// Create a new lock client.
 	locker := redislock.New(client)
@@ -62,6 +65,11 @@ func main() {
 	} else if ttl == 0 {
 		fmt.Println("Now, my lock has expired!")
 	}
+
+	// Output:
+	// I have a lock!
+	// Yay, I still have my lock!
+	// Now, my lock has expired!
 
 }
 ```

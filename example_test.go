@@ -15,7 +15,6 @@ func Example() {
 		MaxIdle:     3,
 		IdleTimeout: 240 * time.Second,
 		Dial: func() (redis.Conn, error) {
-			// TODO: connect to database bsaed on the client id
 			return redis.Dial("tcp", ":6379",
 				redis.DialDatabase(1))
 		},
