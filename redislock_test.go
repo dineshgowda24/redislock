@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/bsm/redislock"
-	"github.com/go-redis/redis/v7"
+	"github.com/garyburd/redigo/redis"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -23,7 +23,10 @@ var _ = Describe("Client", func() {
 	})
 
 	AfterEach(func() {
-		Expect(redisClient.Del(lockKey).Err()).To(Succeed())
+		conn := redisClient.Get()
+		defer conn.Close()
+		_, err := redis.Int64(conn.Do("DEL", lockKey))
+		Expect(err).To(Succeed())
 	})
 
 	It("should obtain once with TTL", func() {
@@ -72,11 +75,14 @@ var _ = Describe("Client", func() {
 		Expect(lock.Release()).To(MatchError(redislock.ErrLockNotHeld))
 	})
 
-	It("should fail to release if ontained by someone else", func() {
+	It("should fail to release if obtained by someone else", func() {
 		lock, err := redislock.Obtain(redisClient, lockKey, time.Minute, nil)
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(redisClient.Set(lockKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
+		conn := redisClient.Get()
+		defer conn.Close()
+		_, err = conn.Do("SET", lockKey, "ABCD")
+		Expect(err).NotTo(HaveOccurred())
 		Expect(lock.Release()).To(MatchError(redislock.ErrLockNotHeld))
 	})
 
@@ -89,9 +95,13 @@ var _ = Describe("Client", func() {
 
 	It("should retry if enabled", func() {
 		// retry, succeed
-		Expect(redisClient.Set(lockKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
-		Expect(redisClient.PExpire(lockKey, 20*time.Millisecond).Err()).NotTo(HaveOccurred())
-
+		conn := redisClient.Get()
+		defer conn.Close()
+		_, err := conn.Do("SET", lockKey, "ABCD")
+		Expect(err).NotTo(HaveOccurred())
+		//20 millisecond
+		_, err = conn.Do("PEXPIRE", lockKey, 20)
+		Expect(err).NotTo(HaveOccurred())
 		lock, err := redislock.Obtain(redisClient, lockKey, time.Hour, &redislock.Options{
 			RetryStrategy: redislock.LimitRetry(redislock.LinearBackoff(100*time.Millisecond), 3),
 		})
@@ -99,20 +109,37 @@ var _ = Describe("Client", func() {
 		Expect(lock.Release()).To(Succeed())
 
 		// no retry, fail
-		Expect(redisClient.Set(lockKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
-		Expect(redisClient.PExpire(lockKey, 50*time.Millisecond).Err()).NotTo(HaveOccurred())
+		_, err = conn.Do("SET", lockKey, "ABCD")
+		Expect(err).NotTo(HaveOccurred())
+		_, err = conn.Do("PEXPIRE", lockKey, 50)
+		Expect(err).NotTo(HaveOccurred())
 
 		_, err = redislock.Obtain(redisClient, lockKey, time.Hour, nil)
 		Expect(err).To(MatchError(redislock.ErrNotObtained))
 
-		// retry 2x, give up & fail
-		Expect(redisClient.Set(lockKey, "ABCD", 0).Err()).NotTo(HaveOccurred())
-		Expect(redisClient.PExpire(lockKey, 50*time.Millisecond).Err()).NotTo(HaveOccurred())
+		// // retry 2x, give up & fail
+		_, err = conn.Do("SET", lockKey, "ABCD")
+		Expect(err).NotTo(HaveOccurred())
+		_, err = conn.Do("PEXPIRE", lockKey, 50)
+		Expect(err).NotTo(HaveOccurred())
 
 		_, err = redislock.Obtain(redisClient, lockKey, time.Hour, &redislock.Options{
 			RetryStrategy: redislock.LimitRetry(redislock.LinearBackoff(time.Millisecond), 2),
 		})
 		Expect(err).To(MatchError(redislock.ErrNotObtained))
+
+		// // retry 3x, pass
+		_, err = conn.Do("SET", lockKey, "ABCD")
+		Expect(err).NotTo(HaveOccurred())
+		_, err = conn.Do("PEXPIRE", lockKey, 50)
+		Expect(err).NotTo(HaveOccurred())
+
+		lock, err = redislock.Obtain(redisClient, lockKey, 2*time.Hour, &redislock.Options{
+			RetryStrategy: redislock.LimitRetry(redislock.LinearBackoff(20*time.Millisecond), 3),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(lock.TTL()).To(BeNumerically("~", 2*time.Hour, time.Second))
+		Expect(lock.Release()).To(Succeed())
 	})
 
 	It("should prevent multiple locks (fuzzing)", func() {
@@ -183,14 +210,21 @@ func TestSuite(t *testing.T) {
 	RunSpecs(t, "redislock")
 }
 
-var redisClient *redis.Client
+var redisClient *redis.Pool
 
 var _ = BeforeSuite(func() {
-	redisClient = redis.NewClient(&redis.Options{
-		Network: "tcp",
-		Addr:    "127.0.0.1:6379", DB: 9,
-	})
-	Expect(redisClient.Ping().Err()).To(Succeed())
+	redisClient = &redis.Pool{
+		MaxIdle:     3,
+		IdleTimeout: 240 * time.Second,
+		Dial: func() (redis.Conn, error) {
+			// TODO: connect to database bsaed on the client id
+			return redis.Dial("tcp", ":6379",
+				redis.DialDatabase(1))
+		},
+	}
+	conn := redisClient.Get()
+	defer conn.Close()
+	Expect(conn.Err()).To(Succeed())
 })
 
 var _ = AfterSuite(func() {
