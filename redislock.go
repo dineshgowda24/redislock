@@ -9,14 +9,12 @@ import (
 	"strconv"
 	"sync"
 	"time"
-
-	"github.com/garyburd/redigo/redis"
 )
 
-var (
-	luaRefresh = redis.NewScript(1, `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`)
-	luaRelease = redis.NewScript(1, `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`)
-	luaPTTL    = redis.NewScript(1, `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pttl", KEYS[1]) else return -3 end`)
+const (
+	LuaRefreshScript = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`
+	LuaReleaseScript = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`
+	LuaPTTLScript    = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pttl", KEYS[1]) else return -3 end`
 )
 
 var (
@@ -27,15 +25,22 @@ var (
 	ErrLockNotHeld = errors.New("redislock: lock not held")
 )
 
+type RedisClient interface {
+	SetNX(key, value string, ttl time.Duration) (bool, error)
+	Refresh(key, value string, ttl string) error
+	Release(key, value string) error
+	TTL(key, value string) (int64, error)
+}
+
 type Client struct {
-	pool  *redis.Pool
-	tmp   []byte
-	tmpMu sync.Mutex
+	redisClient RedisClient
+	tmp         []byte
+	tmpMu       sync.Mutex
 }
 
 // // New creates a new Client instance with a custom namespace.
-func New(pool *redis.Pool) *Client {
-	return &Client{pool: pool}
+func New(redisClient RedisClient) *Client {
+	return &Client{redisClient: redisClient}
 }
 
 // Obtain tries to obtain a new lock using a key with the given TTL.
@@ -84,16 +89,7 @@ func (c *Client) Obtain(key string, ttl time.Duration, opt *Options) (*Lock, err
 }
 
 func (c *Client) obtain(key, value string, ttl time.Duration) (bool, error) {
-	con := c.pool.Get()
-	defer con.Close()
-	_, err := redis.String(con.Do("SET", key, value, "PX", ttl.Milliseconds(), "NX"))
-	//Redigo returns nil so that means lock is not obtained so mask and return error
-	if err == redis.ErrNil {
-		return false, nil
-	} else if err != nil {
-		return false, err
-	}
-	return true, nil
+	return c.redisClient.SetNX(key, value, ttl)
 }
 
 func (c *Client) randomToken() (string, error) {
@@ -119,8 +115,8 @@ type Lock struct {
 }
 
 // Obtain is a short-cut for New(...).Obtain(...).
-func Obtain(pool *redis.Pool, key string, ttl time.Duration, opt *Options) (*Lock, error) {
-	return New(pool).Obtain(key, ttl, opt)
+func Obtain(redisClient RedisClient, key string, ttl time.Duration, opt *Options) (*Lock, error) {
+	return New(redisClient).Obtain(key, ttl, opt)
 }
 
 // Key returns the redis key used by the lock.
@@ -139,13 +135,8 @@ func (l *Lock) Metadata() string {
 }
 
 func (l *Lock) TTL() (time.Duration, error) {
-	con := l.client.pool.Get()
-	defer con.Close()
-
-	res, err := redis.Int64(luaPTTL.Do(con, l.key, l.value))
-	if err == redis.ErrNil {
-		return 0, nil
-	} else if err != nil {
+	res, err := l.client.redisClient.TTL(l.key, l.value)
+	if err != nil {
 		return 0, err
 	}
 
@@ -159,40 +150,13 @@ func (l *Lock) TTL() (time.Duration, error) {
 // Refresh extends the lock with a new TTL.
 // May return ErrNotObtained if refresh is unsuccessful.
 func (l *Lock) Refresh(ttl time.Duration, opt *Options) error {
-	con := l.client.pool.Get()
-	defer con.Close()
-
-	ttlVal := strconv.FormatInt(int64(ttl/time.Millisecond), 10)
-	status, err := redis.Int64(luaRefresh.Do(con, l.key, l.value, ttlVal))
-	if err != nil {
-		return err
-	} else if status == 1 {
-		return nil
-	}
-	//either the value did not match or key does not exist
-	return ErrNotObtained
+	return l.client.redisClient.Refresh(l.key, l.value, strconv.FormatInt(int64(ttl/time.Millisecond), 10))
 }
 
 // Release manually releases the lock.
 // May return ErrLockNotHeld.
 func (l *Lock) Release() error {
-	con := l.client.pool.Get()
-	defer con.Close()
-
-	res, err := redis.Int64(luaRelease.Do(con, l.key, l.value))
-	if err == redis.ErrNil {
-		return ErrLockNotHeld
-	} else if err != nil {
-		return err
-	}
-
-	// if i, ok := res.(int64); !ok || i != 1 {
-	// 	return ErrLockNotHeld
-	// }
-	if res != 1 {
-		return ErrLockNotHeld
-	}
-	return nil
+	return l.client.redisClient.Release(l.key, l.value)
 }
 
 // --------------------------------------------------------------------
