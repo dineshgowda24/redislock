@@ -1,8 +1,8 @@
 # redislock
 
 [![Build Status](https://travis-ci.com/dineshgowda24/redislock.svg)](https://travis-ci.com/dineshgowda24/redislock)
-[![GoDoc](https://godoc.org/github.com/dineshgowda24/redislock?status.png)](http://godoc.org/github.com/bsm/redislock)
-[![Go Report Card](https://goreportcard.com/badge/github.com/dineshgowda24/redislock)](https://goreportcard.com/report/github.com/bsm/redislock)
+[![GoDoc](https://godoc.org/github.com/dineshgowda24/redislock?status.png)](http://godoc.org/github.com/dineshgowda24/redislock)
+[![Go Report Card](https://goreportcard.com/badge/github.com/dineshgowda24/redislock)](https://goreportcard.com/report/github.com/dineshgowda24/redislock)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 Simplified distributed locking implementation using [Redis](http://redis.io/topics/distlock).
