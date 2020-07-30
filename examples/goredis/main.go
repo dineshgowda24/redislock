@@ -1,27 +1,24 @@
-package redislock_test
+package main
 
 import (
 	"fmt"
 	"log"
 	"time"
 
-	"github.com/bsm/redislock"
-	"github.com/garyburd/redigo/redis"
+	"github.com/dineshgowda24/redislock"
+	goredis "github.com/dineshgowda24/redislock/examples/goredis/redisclient"
+	"github.com/go-redis/redis/v7"
 )
 
-func Example() {
+func main() {
 	// Connect to redis.
-	client := &redis.Pool{
-		MaxIdle:     3,
-		IdleTimeout: 240 * time.Second,
-		Dial: func() (redis.Conn, error) {
-			return redis.Dial("tcp", ":6379",
-				redis.DialDatabase(1))
-		},
-	}
+	redisClient := redis.NewClient(&redis.Options{
+		Network: "tcp",
+		Addr:    "127.0.0.1:6379", DB: 9,
+	})
 
 	// Create a new lock client.
-	locker := redislock.New(client)
+	locker := redislock.New(goredis.NewRedisLockClient(redisClient))
 
 	// Try to obtain lock.
 	lock, err := locker.Obtain("my-key", 100*time.Millisecond, nil)
