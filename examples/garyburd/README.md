@@ -9,7 +9,7 @@ type RedisLockClient struct {
 }
 ```
 
-The struct implements `RedisClient` interface from [redislock.go](../../../../redislock.go)
+`RedisLockClient` implements `RedisClient` interface from `redislock.go`
 
 ## Installing the dependencies
 

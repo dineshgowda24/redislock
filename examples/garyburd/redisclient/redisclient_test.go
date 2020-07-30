@@ -209,7 +209,7 @@ var _ = Describe("RetryStrategy", func() {
 
 func TestSuite(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "redislock")
+	RunSpecs(t, "redisclient")
 }
 
 var redisPool *redis.Pool

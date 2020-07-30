@@ -20,7 +20,7 @@ I came across a concurrency issue when multiple clients were accessing single re
 
 ## Examples
 
-Check out examples in for [`garyburd`](./examples/garyburd) and [`go-redis`](./examples/go-redis) clients.
+Check out examples in for [`garyburd`](./examples/garyburd) and [`go-redis`](./examples/goredis) clients.
 
 ## Documentation
 
@@ -28,4 +28,4 @@ Full documentation is available on [GoDoc](http://godoc.org/github.com/dineshgow
 
 ## Contribution
 
-Feel free to send a PR
+Feel free to send a PR.
