@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+//lua scripts which should be loaded to redis client when implementing RedisClient interface
 const (
 	LuaRefreshScript = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`
 	LuaReleaseScript = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`
@@ -25,6 +26,7 @@ var (
 	ErrLockNotHeld = errors.New("redislock: lock not held")
 )
 
+//Implement the interface with which every redis client you wish to use
 type RedisClient interface {
 	SetNX(key, value string, ttl time.Duration) (bool, error)
 	Refresh(key, value string, ttl string) error
